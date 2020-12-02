@@ -1,6 +1,6 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-indicators/TD-Sequential-Ultimate/"
-#property version   "1.00"
+#property version   "1.01"
 
 #property description "Shows setups and countdowns based on Tom DeMark's Sequential method."
 #property description "TDST support and resistance levels are marked too."
@@ -137,6 +137,7 @@ int OnCalculate(const int rates_total,
    static int Setup_Buy = 0;
    static datetime Setup_Buy_First_Candle = 0;
    static double Setup_Buy_Highest_High = 0;
+   static double Setup_Buy_Highest_High_Candidate = 0;
    static double Setup_Buy_6_Low = 0;
    static double Setup_Buy_7_Low = 0;
    
@@ -150,6 +151,7 @@ int OnCalculate(const int rates_total,
    static int Setup_Sell = 0;
    static datetime Setup_Sell_First_Candle = 0;
    static double Setup_Sell_Lowest_Low = 0;
+   static double Setup_Sell_Lowest_Low_Candidate = 0;
    static double Setup_Sell_6_High = 0;
    static double Setup_Sell_7_High = 0;
    
@@ -229,35 +231,24 @@ int OnCalculate(const int rates_total,
       
       // Buy Setup.
 
-      // Price Flip check:
-      if (Close[i + 1] >= Close[i + 5])
+      // Price Flip check + 
+      // First Buy Setup candle + 
+      // Setup_Buy == 0 for when no previous Buy Setup present. Setup_Buy == 9 for when one Buy Setup follows another:
+      if ((Close[i + 1] >= Close[i + 5]) && (Close[i] < Close[i + 4]) && ((Setup_Buy == 0) || (Setup_Buy == 9))) 
       {
-         // First Buy Setup candle:
-         if ((Close[i] < Close[i + 4]) && (Setup_Buy == 0))
-         {
-            Setup_Buy = 1;
-            PutCount(COUNT_TYPE_BUY_SETUP, IntegerToString(Setup_Buy), Time[i], Low[i]);
-            Setup_Buy_First_Candle = Time[i];  // Remember the first candle to wipe the Setup if it fails before completing.
-            Setup_Buy_Highest_High = High[i];
-//            Countdown_Sell = 0; // Reset Sell Countdown.
-//            No_More_Countdown_Sell_Until_Next_Sell_Setup = true;
-            if ((Setup_Sell > 0) && (Setup_Sell < 9))
-            {
-               RemoveCount(COUNT_TYPE_SELL_SETUP, Setup_Sell_First_Candle, Setup_Sell, Time); // Remove number objects for this Sell Setup.
-            }
-            Setup_Sell = 0; // Reset Sell Setup.
-            Setup[i] = Setup_Buy;
-            continue; // Nothing to do with this candle.
-         }
+         Setup_Buy = 1;
+         PutCount(COUNT_TYPE_BUY_SETUP, IntegerToString(Setup_Buy), Time[i], Low[i]);
+         Setup_Buy_First_Candle = Time[i];  // Remember the first candle to wipe the Setup if it fails before completing.
+         Setup_Buy_Highest_High_Candidate = High[i];
+         Setup[i] = Setup_Buy;
       }
-
       // Buy Setup candles - second through nine:
-      if ((Close[i] < Close[i + 4]) && (Setup_Buy > 0) && (Setup_Buy < 9))
+      else if ((Close[i] < Close[i + 4]) && (Setup_Buy > 0) && (Setup_Buy < 9))
       {
          Setup_Buy++;
          Setup[i] = Setup_Buy;
          PutCount(COUNT_TYPE_BUY_SETUP, IntegerToString(Setup_Buy), Time[i], Low[i]);
-         if (Setup_Buy_Highest_High < High[i]) Setup_Buy_Highest_High = High[i];
+         if (Setup_Buy_Highest_High_Candidate < High[i]) Setup_Buy_Highest_High_Candidate = High[i];
          
          // These are needed for perfection checks.
          if (Setup_Buy == 6) Setup_Buy_6_Low = Low[i];
@@ -272,6 +263,7 @@ int OnCalculate(const int rates_total,
             Setup_Buy_Needs_Perfecting = true;
             No_More_Countdown_Buy_Until_Next_Buy_Setup = false;
             Setup_Sell = 0;
+            Setup_Buy_Highest_High = Setup_Buy_Highest_High_Candidate;
             for (int j = i; j < i + 9; j++)
             {
                Resistance[j] = Setup_Buy_Highest_High;
@@ -291,12 +283,12 @@ int OnCalculate(const int rates_total,
          }
       }
       // Buy Setup broken:
-      else if ((Close[i] >= Close[i + 4]) && (Setup_Buy != 9))
+      else if ((Close[i] >= Close[i + 4]) && (Setup_Buy != 9) && (Setup_Buy != 0))
       {
          RemoveCount(COUNT_TYPE_BUY_SETUP, Setup_Buy_First_Candle, Setup_Buy, Time); // Remove number objects for this Buy Setup.
          Setup_Buy = 0;
          Setup_Buy_First_Candle = 0;
-         Setup_Buy_Highest_High = 0;
+         Setup_Buy_Highest_High_Candidate = 0;
          Setup_Buy_Needs_Perfecting = false;
          Setup_Buy_Perfected = false;
       }
@@ -331,8 +323,8 @@ int OnCalculate(const int rates_total,
          }
       }
       
-      // Check if Countdown is broken and if Setup is perfected.
-      if (Setup_Buy == 9) // Have a completed Buy Setup.
+      // Check if Countdown is broken.
+      if (Countdown_Buy > 1) // Have a Buy Countdown that can be interrupted.
       {
          if ((Low[i] > Setup_Buy_Highest_High) && (Close[i + 1] > Setup_Buy_Highest_High))
          {
@@ -340,8 +332,8 @@ int OnCalculate(const int rates_total,
             Setup_Buy = 0;
          }
       }
-      // Setup Buy candles #9+
-      if ((!Setup_Buy_Perfected) && (Setup_Buy_Needs_Perfecting))
+      // Check if Setup is perfected.
+      if ((!Setup_Buy_Perfected) && (Setup_Buy_Needs_Perfecting)) // Setup Buy candles #9+.
       {
          if ((Low[i] < Setup_Buy_6_Low) && (Low[i] < Setup_Buy_7_Low))
          {
@@ -355,31 +347,24 @@ int OnCalculate(const int rates_total,
       
       // Sell Setup.
 
-      // Price Flip check:
-      if (Close[i + 1] <= Close[i + 5])
+      // Price Flip check + 
+      // First Sell Setup candle + 
+      // Setup_Sell == 0 for when no previous Sell Setup present. Setup_Sell == 9 for when one Sell Setup follows another:
+      if ((Close[i + 1] <= Close[i + 5]) && (Close[i] > Close[i + 4]) && ((Setup_Sell == 0) || (Setup_Sell == 9)))
       {
-         // First Sell Setup candle:
-         if ((Close[i] > Close[i + 4]) && (Setup_Sell == 0))
-         {
-            Setup_Sell = 1;
-            PutCount(COUNT_TYPE_SELL_SETUP, IntegerToString(Setup_Sell), Time[i], High[i]);
-            Setup_Sell_First_Candle = Time[i];  // Remember the first candle to wipe the Setup if it fails before completing.
-            Setup_Sell_Lowest_Low = Low[i];
-//            Countdown_Buy = 0; // Reset Buy Countdown.
-//            No_More_Countdown_Buy_Until_Next_Buy_Setup = true;
-            if (Setup_Buy != 9) Setup_Buy = 0; // Reset Buy Setup.
-            Setup[i] = -Setup_Sell;
-            continue; // Nothing to do with this candle.
-         }
+         Setup_Sell = 1;
+         PutCount(COUNT_TYPE_SELL_SETUP, IntegerToString(Setup_Sell), Time[i], High[i]);
+         Setup_Sell_First_Candle = Time[i];  // Remember the first candle to wipe the Setup if it fails before completing.
+         Setup_Sell_Lowest_Low_Candidate = Low[i];
+         Setup[i] = -Setup_Sell;
       }
-
       // Sell Setup candles - second through nine:
-      if ((Close[i] > Close[i + 4]) && (Setup_Sell > 0) && (Setup_Sell < 9))
+      else if ((Close[i] > Close[i + 4]) && (Setup_Sell > 0) && (Setup_Sell < 9))
       {
          Setup_Sell++;
          Setup[i] = -Setup_Sell;
          PutCount(COUNT_TYPE_SELL_SETUP, IntegerToString(Setup_Sell), Time[i], High[i]);
-         if (Setup_Sell_Lowest_Low > Low[i]) Setup_Sell_Lowest_Low = Low[i];
+         if (Setup_Sell_Lowest_Low_Candidate > Low[i]) Setup_Sell_Lowest_Low_Candidate = Low[i];
          
          // These are needed for perfection checks.
          if (Setup_Sell == 6) Setup_Sell_6_High = High[i];
@@ -394,6 +379,7 @@ int OnCalculate(const int rates_total,
             Setup_Sell_Needs_Perfecting = true;
             No_More_Countdown_Sell_Until_Next_Sell_Setup = false;
             Setup_Buy = 0;
+            Setup_Sell_Lowest_Low = Setup_Sell_Lowest_Low_Candidate;
             for (int j = i; j < i + 9; j++)
             {
                Support[j] = Setup_Sell_Lowest_Low;
@@ -413,12 +399,12 @@ int OnCalculate(const int rates_total,
          }
       }
       // Sell Setup broken:
-      else if ((Close[i] <= Close[i + 4]) && (Setup_Sell != 9))
+      else if ((Close[i] <= Close[i + 4]) && (Setup_Sell != 9) && (Setup_Sell != 0))
       {
          RemoveCount(COUNT_TYPE_SELL_SETUP, Setup_Sell_First_Candle, Setup_Sell, Time); // Remove number objects for this Sell Setup.
          Setup_Sell = 0;
          Setup_Sell_First_Candle = 0;
-         Setup_Sell_Lowest_Low = 0;
+         Setup_Sell_Lowest_Low_Candidate = 0;
          Setup_Sell_Needs_Perfecting = false;
          Setup_Sell_Perfected = false;
       }
@@ -453,8 +439,8 @@ int OnCalculate(const int rates_total,
          }
       }
       
-      // Check if Countdown is broken and if Setup is perfected.
-      if (Setup_Sell == 9) // Have a completed Sell Setup.
+      // Check if Countdown is broken.
+      if (Countdown_Sell > 0) // Have a Sell Countdown that can be interrupted.
       {
          if ((High[i] < Setup_Sell_Lowest_Low) && (Close[i + 1] < Setup_Sell_Lowest_Low))
          {
@@ -462,8 +448,8 @@ int OnCalculate(const int rates_total,
             Setup_Sell = 0;
          }
       }
-      // Setup Sell candles #9+
-      if ((!Setup_Sell_Perfected) && (Setup_Sell_Needs_Perfecting))
+      // Check if Setup is perfected.
+      if ((!Setup_Sell_Perfected) && (Setup_Sell_Needs_Perfecting)) // Setup Sell candles #9+.
       {
          if ((High[i] > Setup_Sell_6_High) && (High[i] > Setup_Sell_7_High))
          {
