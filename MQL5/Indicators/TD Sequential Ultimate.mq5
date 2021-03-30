@@ -1,6 +1,6 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-indicators/TD-Sequential-Ultimate/"
-#property version   "1.01"
+#property version   "1.02"
 
 #property description "Shows setups and countdowns based on Tom DeMark's Sequential method."
 #property description "TDST support and resistance levels are marked too."
@@ -20,13 +20,11 @@
 #property indicator_buffers 5 // +3 buffers for usage with iCustom(), they won't be displayed by the indicator.
 #property indicator_plots 5 // Only two are actually displayed. Three others are necessary for iCustom().
 #property indicator_color1 clrRed
-#property indicator_type1  DRAW_LINE
-#property indicator_style1 STYLE_DASH
+#property indicator_type1  DRAW_ARROW  // Arrows are better because line support/resistance have vertical connections.
 #property indicator_width1 1
 #property indicator_label1 "TDST Resistance"
 #property indicator_color2 clrGreen
-#property indicator_type2  DRAW_LINE
-#property indicator_style2 STYLE_DASH
+#property indicator_type2  DRAW_ARROW
 #property indicator_width2 1
 #property indicator_label2 "TDST Support"
 #property indicator_type3  DRAW_NONE
@@ -39,7 +37,9 @@
 #property indicator_label5 "Perfection"
 #property indicator_color5 clrNONE
 
-input group "Main"
+input group "Calculation"
+input int MaxBars  = 1000; // MaxBars: how many bars to calculate; 0 = all bars.
+input group "Display"
 input color BuySetupColor  = clrLime;
 input color SellSetupColor = clrRed;
 input color CountdownColor = clrOrange;
@@ -100,6 +100,9 @@ int OnInit()
    ArraySetAsSeries(Countdown, true);
    ArraySetAsSeries(Perfection, true);
    
+   PlotIndexSetInteger(0, PLOT_ARROW, 158);
+   PlotIndexSetInteger(1, PLOT_ARROW, 158);
+
    PlotIndexSetDouble(0, PLOT_EMPTY_VALUE, EMPTY_VALUE);
    PlotIndexSetDouble(1, PLOT_EMPTY_VALUE, EMPTY_VALUE);
 
@@ -133,6 +136,9 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(High, true);
    ArraySetAsSeries(Low, true);
    ArraySetAsSeries(Close, true);
+   
+   static double Preceding_Close = 0;
+   static bool Use_Preceding_Close = false;
    
    static int Setup_Buy = 0;
    static datetime Setup_Buy_First_Candle = 0;
@@ -209,12 +215,14 @@ int OnCalculate(const int rates_total,
       }
    }
       
+   limit = MathMin(limit, MaxBars);
+
    for (int i = limit; i > 0; i--)
    {
       Setup[i] = 0;
       Countdown[i] = 0;
       Perfection[i] = 0;
-      // Cancel S/R or propgate them:
+      // Cancel S/R or propagate them:
       if ((Resistance[i + 1] != EMPTY_VALUE) && (Close[i] > Resistance[i + 1]))
       {
          Resistance[i] = EMPTY_VALUE;
@@ -236,6 +244,10 @@ int OnCalculate(const int rates_total,
       // Setup_Buy == 0 for when no previous Buy Setup present. Setup_Buy == 9 for when one Buy Setup follows another:
       if ((Close[i + 1] >= Close[i + 5]) && (Close[i] < Close[i + 4]) && ((Setup_Buy == 0) || (Setup_Buy == 9))) 
       {
+         // Remember Close before the Setup's first bar (needed further for TDST Resistance).
+         Preceding_Close = Close[i + 1];
+         Use_Preceding_Close = false;
+         // Set initial values.
          Setup_Buy = 1;
          PutCount(COUNT_TYPE_BUY_SETUP, IntegerToString(Setup_Buy), Time[i], Low[i]);
          Setup_Buy_First_Candle = Time[i];  // Remember the first candle to wipe the Setup if it fails before completing.
@@ -257,14 +269,22 @@ int OnCalculate(const int rates_total,
          if (Setup_Buy == 9)
          {
             Countdown_Sell = 0; // Reset Sell Countdown.
+            RemoveCount(COUNT_TYPE_SELL_COUNTDOWN, Time[i], Time);
             No_More_Countdown_Sell_Until_Next_Sell_Setup = true;
             if (AlertOnSetup) DoAlert(i, ALERT_TYPE_SETUP_BUY);
             Setup_Buy_Perfected = false; // Will be checked farther.
             Setup_Buy_Needs_Perfecting = true;
             No_More_Countdown_Buy_Until_Next_Buy_Setup = false;
             Setup_Sell = 0;
-            Setup_Buy_Highest_High = Setup_Buy_Highest_High_Candidate;
-            for (int j = i; j < i + 9; j++)
+            if (Preceding_Close > Setup_Buy_Highest_High_Candidate)
+            {
+               Setup_Buy_Highest_High = Preceding_Close;
+               Use_Preceding_Close = true;
+            }
+            else Setup_Buy_Highest_High = Setup_Buy_Highest_High_Candidate;
+            int res_count = 9;
+            if (Use_Preceding_Close) res_count = 10; // If preceding bar's Close is used to draw the Resistance line, it should be started at that bar's Close.
+            for (int j = i; j < i + res_count; j++)
             {
                Resistance[j] = Setup_Buy_Highest_High;
                if (High[j] == Setup_Buy_Highest_High) break;
@@ -285,7 +305,7 @@ int OnCalculate(const int rates_total,
       // Buy Setup broken:
       else if ((Close[i] >= Close[i + 4]) && (Setup_Buy != 9) && (Setup_Buy != 0))
       {
-         RemoveCount(COUNT_TYPE_BUY_SETUP, Setup_Buy_First_Candle, Setup_Buy, Time); // Remove number objects for this Buy Setup.
+         RemoveCount(COUNT_TYPE_BUY_SETUP, Setup_Buy_First_Candle, Time, Setup_Buy); // Remove number objects for this Buy Setup.
          Setup_Buy = 0;
          Setup_Buy_First_Candle = 0;
          Setup_Buy_Highest_High_Candidate = 0;
@@ -313,6 +333,8 @@ int OnCalculate(const int rates_total,
                   Countdown[i] = Countdown_Buy;
                   PutCount(COUNT_TYPE_BUY_COUNTDOWN, IntegerToString(Countdown_Buy), Time[i], Low[i]);
                   if (AlertOnCountdown13) DoAlert(i, ALERT_TYPE_COUNT13_BUY);
+                  Countdown_Buy = 0; // Reset Countdown as we have already reached count 13.
+                  No_More_Countdown_Buy_Until_Next_Buy_Setup = true;
                }
                else // Failed Countdown candles 13 are marked with +.
                {
@@ -329,6 +351,7 @@ int OnCalculate(const int rates_total,
          if ((Low[i] > Setup_Buy_Highest_High) && (Close[i + 1] > Setup_Buy_Highest_High))
          {
             Countdown_Buy = 0;
+            RemoveCount(COUNT_TYPE_BUY_COUNTDOWN, Time[i], Time);
             Setup_Buy = 0;
          }
       }
@@ -352,6 +375,10 @@ int OnCalculate(const int rates_total,
       // Setup_Sell == 0 for when no previous Sell Setup present. Setup_Sell == 9 for when one Sell Setup follows another:
       if ((Close[i + 1] <= Close[i + 5]) && (Close[i] > Close[i + 4]) && ((Setup_Sell == 0) || (Setup_Sell == 9)))
       {
+         // Remember Close before the Setup's first bar (needed further for TDST Support).
+         Preceding_Close = Close[i + 1];
+         Use_Preceding_Close = false;
+         // Set initial values.
          Setup_Sell = 1;
          PutCount(COUNT_TYPE_SELL_SETUP, IntegerToString(Setup_Sell), Time[i], High[i]);
          Setup_Sell_First_Candle = Time[i];  // Remember the first candle to wipe the Setup if it fails before completing.
@@ -373,14 +400,23 @@ int OnCalculate(const int rates_total,
          if (Setup_Sell == 9)
          {
             Countdown_Buy = 0; // Reset Buy Countdown.
+            RemoveCount(COUNT_TYPE_BUY_COUNTDOWN, Time[i], Time);
             No_More_Countdown_Buy_Until_Next_Buy_Setup = true;
             if (AlertOnSetup) DoAlert(i, ALERT_TYPE_SETUP_SELL);
             Setup_Sell_Perfected = false; // Will be checked farther.
             Setup_Sell_Needs_Perfecting = true;
             No_More_Countdown_Sell_Until_Next_Sell_Setup = false;
             Setup_Buy = 0;
-            Setup_Sell_Lowest_Low = Setup_Sell_Lowest_Low_Candidate;
-            for (int j = i; j < i + 9; j++)
+            if (Preceding_Close < Setup_Sell_Lowest_Low_Candidate)
+										   
+            {
+               Setup_Sell_Lowest_Low = Preceding_Close;
+               Use_Preceding_Close = true;
+            }
+            else Setup_Sell_Lowest_Low = Setup_Sell_Lowest_Low_Candidate;
+            int supp_count = 9;
+            if (Use_Preceding_Close) supp_count = 10; // If preceding bar's Close is used to draw the Support line, it should be started at that bar's Close.
+            for (int j = i; j < i + supp_count; j++)
             {
                Support[j] = Setup_Sell_Lowest_Low;
                if (Low[j] == Setup_Sell_Lowest_Low) break;
@@ -401,7 +437,7 @@ int OnCalculate(const int rates_total,
       // Sell Setup broken:
       else if ((Close[i] <= Close[i + 4]) && (Setup_Sell != 9) && (Setup_Sell != 0))
       {
-         RemoveCount(COUNT_TYPE_SELL_SETUP, Setup_Sell_First_Candle, Setup_Sell, Time); // Remove number objects for this Sell Setup.
+         RemoveCount(COUNT_TYPE_SELL_SETUP, Setup_Sell_First_Candle, Time, Setup_Sell); // Remove number objects for this Sell Setup.
          Setup_Sell = 0;
          Setup_Sell_First_Candle = 0;
          Setup_Sell_Lowest_Low_Candidate = 0;
@@ -429,6 +465,8 @@ int OnCalculate(const int rates_total,
                   Countdown[i] = -Countdown_Sell;
                   PutCount(COUNT_TYPE_SELL_COUNTDOWN, IntegerToString(Countdown_Sell), Time[i], High[i]);
                   if (AlertOnCountdown13) DoAlert(i, ALERT_TYPE_COUNT13_SELL);
+                  Countdown_Sell = 0; // Reset Countdown as we have already reached count 13.
+                  No_More_Countdown_Sell_Until_Next_Sell_Setup = true;
                }
                else // Failed Countdown candles 13 are marked with +.
                {
@@ -445,6 +483,7 @@ int OnCalculate(const int rates_total,
          if ((High[i] < Setup_Sell_Lowest_Low) && (Close[i + 1] < Setup_Sell_Lowest_Low))
          {
             Countdown_Sell = 0;
+            RemoveCount(COUNT_TYPE_SELL_COUNTDOWN, Time[i], Time);
             Setup_Sell = 0;
          }
       }
@@ -596,21 +635,41 @@ void RedrawVisibleLabels()
    ChartRedraw();
 }
 
-// Remove number objects for a given setup.
-void RemoveCount(const ENUM_COUNT_TYPE count_type, const datetime begin, const int n, const datetime &Time[])
+void RemoveCount(const ENUM_COUNT_TYPE count_type, const datetime begin, const datetime &Time[], const int n = 0)
 {
    string name_start = Prefix;
    if (count_type == COUNT_TYPE_BUY_SETUP) name_start += "BS";
    else if (count_type == COUNT_TYPE_SELL_SETUP) name_start += "SS";
+   else if (count_type == COUNT_TYPE_BUY_COUNTDOWN) name_start += "BC";
+   else if (count_type == COUNT_TYPE_SELL_COUNTDOWN) name_start += "SC";
 
    int begin_candle = iBarShift(Symbol(), Period(), begin, true);
 
    if (begin_candle == -1) return; // Some data error.
    
-   for (int i = begin_candle; i > begin_candle - n; i--)
+   // Setup
+   if ((count_type == COUNT_TYPE_BUY_SETUP) || (count_type == COUNT_TYPE_SELL_SETUP))
    {
-      string name = name_start + IntegerToString(Time[i]);
-      ObjectDelete(0, name);
+      for (int i = begin_candle; i > begin_candle - n; i--)
+      {
+         string name = name_start + IntegerToString(Time[i]);
+         ObjectDelete(0, name);
+      }
+   }
+   // Countdown
+   else if ((count_type == COUNT_TYPE_BUY_COUNTDOWN) || (count_type == COUNT_TYPE_SELL_COUNTDOWN))
+   {
+      // The number of countdown objects is unknown.
+      for (int i = begin_candle; i < Bars(Symbol(), Period()); i++)
+      {
+         string name = name_start + IntegerToString(Time[i]);
+         if (ObjectGetString(ChartID(), name, OBJPROP_TEXT) == "1") // The last one.
+         {
+            ObjectDelete(0, name);
+            return;
+         }
+         ObjectDelete(0, name); // Attempt to delete even if it doesn't exist.
+      }
    }
 }
 
