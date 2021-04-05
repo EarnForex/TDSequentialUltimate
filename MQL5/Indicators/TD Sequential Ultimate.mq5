@@ -1,6 +1,6 @@
 #property copyright "EarnForex.com"
 #property link      "https://www.earnforex.com/metatrader-indicators/TD-Sequential-Ultimate/"
-#property version   "1.02"
+#property version   "1.03"
 
 #property description "Shows setups and countdowns based on Tom DeMark's Sequential method."
 #property description "TDST support and resistance levels are marked too."
@@ -268,8 +268,11 @@ int OnCalculate(const int rates_total,
          
          if (Setup_Buy == 9)
          {
-            Countdown_Sell = 0; // Reset Sell Countdown.
-            RemoveCount(COUNT_TYPE_SELL_COUNTDOWN, Time[i], Time);
+            if (Countdown_Sell > 0)
+            {
+               Countdown_Sell = 0; // Reset Sell Countdown.
+               RemoveCount(COUNT_TYPE_SELL_COUNTDOWN, Time[i], Time);
+            }
             No_More_Countdown_Sell_Until_Next_Sell_Setup = true;
             if (AlertOnSetup) DoAlert(i, ALERT_TYPE_SETUP_BUY);
             Setup_Buy_Perfected = false; // Will be checked farther.
@@ -346,7 +349,7 @@ int OnCalculate(const int rates_total,
       }
       
       // Check if Countdown is broken.
-      if (Countdown_Buy > 1) // Have a Buy Countdown that can be interrupted.
+      if (Countdown_Buy > 0) // Have a Buy Countdown that can be interrupted.
       {
          if ((Low[i] > Setup_Buy_Highest_High) && (Close[i + 1] > Setup_Buy_Highest_High))
          {
@@ -399,8 +402,11 @@ int OnCalculate(const int rates_total,
          
          if (Setup_Sell == 9)
          {
-            Countdown_Buy = 0; // Reset Buy Countdown.
-            RemoveCount(COUNT_TYPE_BUY_COUNTDOWN, Time[i], Time);
+            if (Countdown_Buy > 0)
+            {
+               Countdown_Buy = 0; // Reset Buy Countdown.
+               RemoveCount(COUNT_TYPE_BUY_COUNTDOWN, Time[i], Time);
+            }
             No_More_Countdown_Buy_Until_Next_Buy_Setup = true;
             if (AlertOnSetup) DoAlert(i, ALERT_TYPE_SETUP_SELL);
             Setup_Sell_Perfected = false; // Will be checked farther.
