@@ -10,6 +10,6 @@ You can configure the the color/style options and alerts for all TD Sequential e
 ![TD Sequentual Ultimate - an example chart with a perfected Sell Setup and Countdown 13](https://github.com/EarnForex/TDSequentialUltimate/blob/master/README%20Images/TD%20Sequential%20Ultimate.png)
 
 A detailed description of the indicator is available here:
-https://www.earnforex.com/metatrader-indicators/TD-Sequential-Ultimate/
+https://www.earnforex.com/indicators/TD-Sequential-Ultimate/
 
 If you have any suggestions for improvement of this indicator, please create an issue or submit a pull-request.
